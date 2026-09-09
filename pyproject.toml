@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cisreg"
+version = "0.1.0"
+description = "Closest point on a triangle mesh, rigid ICP and deformable registration to a statistical shape model (JHU CIS I, PA3 to PA5)"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Parmida Mazloomi" }]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
