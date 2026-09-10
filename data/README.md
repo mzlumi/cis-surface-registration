@@ -7,7 +7,7 @@ The official Fall 2025 data for Programming Assignments 3, 4 and 5 of JHU EN.601
 | File | Contents |
 |---|---|
 | `Problem3Mesh.sur` (same file as `Problem3MeshFile.sur`, `Problem4MeshFile.sur`, `Problem5MeshFile.sur`) | Bone surface mesh in CT coordinates: 1568 vertices, then triangles as 3 vertex indices plus 3 neighbour triangle indices (-1 means no neighbour; not needed) |
-| `ProblemN-BodyA.txt`, `ProblemN-BodyB.txt` (N = 3, 4, 5) | Rigid body definitions: LED marker positions in body coordinates, then the tip position. Body A is the pointer. Body B is screwed into the bone. The bodies differ between problems. |
+| `ProblemN-BodyA.txt`, `ProblemN-BodyB.txt` (N = 3, 4, 5) | Rigid body definitions: LED marker positions in body coordinates, then the tip position. Body A is the pointer. Body B is screwed into the bone. The marker and tip values are the same in all three problems; only the file name on the header line differs. |
 | `Problem5Modes.txt` | Statistical shape atlas: mode 0 is the mean shape (same vertices as the mesh), then modes 1 to 6 are per-vertex displacements |
 
 ## Sample sets
@@ -33,3 +33,5 @@ Output formats:
 - Separators vary: the sample headers use commas (`16, 150, PA5-A-Debug-SampleReadingsTest.txt 6`), while the output and answer headers use spaces (`15 PA3-A-Debug-Answer.txt 0`). Split on commas and whitespace.
 - The PA5 sample header has a fourth field, the number of modes. The PA3 and PA4 headers carry a trailing `0` there.
 - The handout calls the files `paV-X-ddddd-SampleReadings.txt`. The actual names are `PAV-X-Ddddd-SampleReadingsTest.txt`.
+- Output and answer coordinates are rounded to 0.01 mm, so |s_k − c_k| recomputed from them differs from the stored magnitude by up to about 0.017 mm.
+- In the log files, each `R*x`, `R*y`, `R*z` line is a column of the rotation matrix. The PA5 weights are listed as "Mode 0" to "Mode 5"; these are atlas modes 1 to 6 (mode 0 of the atlas file is the mean shape). The first PA4 entry has no matrix block, and `PA4-B-Demo-Fast` appears twice.
