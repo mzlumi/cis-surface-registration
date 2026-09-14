@@ -179,6 +179,67 @@ def read_output(path: str | Path) -> RegistrationOutput:
     )
 
 
+def format_output(name: str, s: np.ndarray, c: np.ndarray, weights: np.ndarray | None = None) -> str:
+    """Text of an output file in the handout format, with the instructor's column widths.
+
+    Header: ``N_samps filename N_modes`` (N_modes is 0 for PA3 and PA4). For PA5 the
+    mode weights follow on one line with 4 decimals. Each sample line holds s_k
+    (d_k in PA3), c_k and |s_k - c_k|.
+    """
+    s = np.asarray(s, dtype=float)
+    c = np.asarray(c, dtype=float)
+    weights = np.zeros(0) if weights is None else np.asarray(weights, dtype=float)
+    lines = [f"{len(s)} {name} {len(weights)}"]
+    if len(weights):
+        lines.append("".join(f"{w:10.4f}" for w in weights))
+    for sk, ck, dk in zip(s, c, np.linalg.norm(s - c, axis=1)):
+        lines.append(
+            f"{sk[0]:8.2f}{sk[1]:9.2f}{sk[2]:9.2f}{ck[0]:13.2f}{ck[1]:9.2f}{ck[2]:9.2f}{dk:10.3f}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def write_output(
+    path: str | Path, s: np.ndarray, c: np.ndarray, weights: np.ndarray | None = None
+) -> None:
+    """Write an output file; the header carries the file's own name, as in the handout."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(format_output(path.name, s, c, weights))
+
+
+def format_output(
+    name: str, s: np.ndarray, c: np.ndarray, weights: np.ndarray | None = None
+) -> str:
+    """Text of an output file in the layout of the instructor's Output files.
+
+    Header ``N_samps name N_modes``; for PA5 a line of mode weights with 4
+    decimals; then one line per sample with s_k, c_k (2 decimals) and |s_k - c_k|
+    (3 decimals).
+    """
+    s = np.asarray(s, dtype=float)
+    c = np.asarray(c, dtype=float)
+    weights = np.zeros(0) if weights is None else np.asarray(weights, dtype=float)
+    distance = np.linalg.norm(s - c, axis=1)
+    lines = [f"{len(s)} {name} {len(weights)}"]
+    if len(weights):
+        lines.append("".join(f"{w:10.4f}" for w in weights))
+    for sk, ck, dk in zip(s, c, distance):
+        lines.append(
+            f"{sk[0]:8.2f}{sk[1]:9.2f}{sk[2]:9.2f}{ck[0]:13.2f}{ck[1]:9.2f}{ck[2]:9.2f}{dk:10.3f}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def write_output(
+    path: str | Path, s: np.ndarray, c: np.ndarray, weights: np.ndarray | None = None
+) -> None:
+    """Write an output file; the name in the header is the file name."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(format_output(path.name, s, c, weights))
+
+
 @dataclass(frozen=True)
 class LogEntry:
     """One ``<set>: summary`` block of an instructor log file (the answer key).
