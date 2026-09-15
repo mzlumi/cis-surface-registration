@@ -46,7 +46,8 @@ class BruteForceSearch:
         corners = np.asarray(vertices, dtype=float)[self.triangles]
         self.p, self.q, self.r = corners[:, 0], corners[:, 1], corners[:, 2]
 
-    def closest_points(self, queries: np.ndarray) -> MeshMatches:
+    def closest_points(self, queries: np.ndarray, hint: np.ndarray | None = None) -> MeshMatches:
+        """Closest mesh points to (N, 3) queries. hint is accepted for a common interface and ignored."""
         queries = np.atleast_2d(np.asarray(queries, dtype=float))
         n = len(queries)
         points = np.empty((n, 3))
