@@ -13,13 +13,13 @@ Author: Parmida Mazloomi
 
 from __future__ import annotations
 
-import argparse
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
 from cisreg import datasets
+from cisreg.cli import build_parser, selected_labels
 from cisreg.datasets import ProblemInputs
 from cisreg.fileio import write_output
 from cisreg.search import BruteForceSearch, MeshMatches
@@ -47,20 +47,10 @@ def run_set(data_dir: Path, output_dir: Path, label: str) -> Path:
     return path
 
 
-def build_parser(assignment: str) -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=f"Run {assignment} on one or more data sets.")
-    which = parser.add_mutually_exclusive_group(required=True)
-    which.add_argument("--set", dest="labels", action="append", help="set label, e.g. A-Debug")
-    which.add_argument("--all", action="store_true", help="run every set in the data directory")
-    parser.add_argument("--data-dir", type=Path, default=datasets.DEFAULT_DATA_DIR)
-    parser.add_argument("--output-dir", type=Path, default=Path("output"))
-    return parser
-
-
 def main(argv: list[str] | None = None) -> None:
-    args = build_parser("PA3").parse_args(argv)
-    labels = datasets.list_sets(args.data_dir, "PA3") if args.all else args.labels
-    for label in labels:
+    parser = build_parser("PA3", "PA3: closest points on the bone surface with F_reg = I.")
+    args = parser.parse_args(argv)
+    for label in selected_labels(args, "PA3"):
         print(f"wrote {run_set(args.data_dir, args.output_dir, label)}")
 
 

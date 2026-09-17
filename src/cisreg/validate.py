@@ -95,6 +95,42 @@ def matching_check(assignment: str, data_dir: Path, search_factory) -> str:
     return "\n".join(lines)
 
 
+def frame_check(assignment: str, data_dir: Path, output_dir: Path, search_factory) -> str:
+    """Compare our F_reg with the instructor's F_reg implied by the reference s'_k.
+
+    The output files do not contain F_reg, but s_k = F_reg d_k with d_k known
+    (our pointer tips), so F_reg can be recovered by registering d_k onto s_k.
+    Doing this for our files and for the reference files gives the two frames.
+    Both are then scored by the ICP objective, the sum over k of the squared
+    distance from F d_k to the surface (for PA5, to the mean shape, so only the
+    frame difference is meaningful there).
+    """
+    from cisreg.frames import frame_difference
+    from cisreg.registration import register_points
+    from cisreg.tracking import pointer_tips
+
+    lines = [
+        "| Set | angle(F^-1 F') (deg) | abs(p - p') (mm) | SSE with our F | SSE with reference F' |",
+        "|---|---|---|---|---|",
+    ]
+    for label in datasets.list_sets(data_dir, assignment):
+        ours_path = Path(output_dir) / f"{assignment}-{label}-Output.txt"
+        if not datasets.is_debug(label) or not ours_path.exists():
+            continue
+        inputs = datasets.load_inputs(data_dir, assignment, label)
+        search = search_factory(inputs.mesh)
+        d = pointer_tips(inputs.body_a, inputs.body_b, inputs.samples)
+        F_ours = register_points(d, read_output(ours_path).s)
+        F_ref = register_points(d, read_output(datasets.output_path(data_dir, assignment, label)).s)
+        angle, distance = frame_difference(F_ours, F_ref)
+        sse_ours = float(np.sum(search.closest_points(F_ours.apply(d)).distances ** 2))
+        sse_ref = float(np.sum(search.closest_points(F_ref.apply(d)).distances ** 2))
+        lines.append(
+            f"| {label} | {np.degrees(angle):.4f} | {distance:.4f} | {sse_ours:.4f} | {sse_ref:.4f} |"
+        )
+    return "\n".join(lines)
+
+
 def markdown_table(rows: list[SetComparison], point: str = "s") -> str:
     with_weights = any(r.weights_max is not None for r in rows)
     header = (
@@ -129,6 +165,11 @@ def main(argv: list[str] | None = None) -> None:
 
         print("Closest-point step alone, on the reference d'_k:\n")
         print(matching_check("PA3", args.data_dir, BruteForceSearch) + "\n")
+    else:
+        from cisreg.boxtree import BoundingBoxTree
+
+        print("Our F_reg against the reference F_reg implied by s'_k:\n")
+        print(frame_check(args.assignment, args.data_dir, args.output_dir, BoundingBoxTree) + "\n")
 
 
 if __name__ == "__main__":
