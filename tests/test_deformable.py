@@ -4,8 +4,16 @@ import numpy as np
 import pytest
 
 from cisreg.boxtree import BoundingBoxTree
-from cisreg.deformable import mode_basis, solve_mode_weights
+from cisreg.deformable import (
+    DeformableOptions,
+    deformable_registration,
+    format_deformable_history,
+    mode_basis,
+    solve_combined_step,
+    solve_mode_weights,
+)
 from cisreg.fileio import read_mesh, read_modes
+from cisreg.frames import Frame, frame_difference, is_rotation, random_rotation, rotation_from_vector
 from cisreg.search import MeshMatches
 from cisreg.shape_model import ShapeModel
 from conftest import DATA_DIR
@@ -63,6 +71,59 @@ def test_noise_gives_close_weights(model):
     noisy = points + rng.normal(scale=0.1, size=points.shape)
     estimate = solve_mode_weights(noisy, mode_basis(model, matches))
     assert np.max(np.abs(estimate - weights)) < 1.0
+
+
+def test_combined_step_recovers_a_small_correction(model):
+    """One linearized solve recovers alpha, epsilon and the weight change to second order."""
+    rng = np.random.default_rng(13)
+    true_weights = rng.normal(scale=60, size=6)
+    target, matches = random_surface_points(model, true_weights, rng, 300)
+    q = mode_basis(model, matches)
+    dweights = rng.normal(scale=0.5, size=6)
+    current = q[0] + np.tensordot(true_weights - dweights, q[1:], axes=1)
+    alpha = np.array([1e-3, -2e-3, 1.5e-3])
+    epsilon = np.array([0.05, -0.02, 0.03])
+    delta = Frame(rotation_from_vector(alpha), epsilon)
+    s = delta.inverse().apply(target)  # so that delta s_k is exactly on the target shape
+    a, e, dw = solve_combined_step(s, current, q)
+    assert np.allclose(a, alpha, atol=2e-5)
+    assert np.allclose(e, epsilon, atol=5e-3)
+    assert np.allclose(dw, dweights, atol=0.05)
+
+
+def synthetic_problem(model, rng, n=200, noise=0.0):
+    weights = rng.normal(scale=60, size=model.n_modes)
+    F_true = Frame(random_rotation(rng, np.radians(3.0)), rng.uniform(-2, 2, size=3))
+    points, _ = random_surface_points(model, weights, rng, n)
+    points = points + rng.normal(scale=noise, size=points.shape) if noise else points
+    return weights, F_true, F_true.inverse().apply(points)
+
+
+def test_full_registration_recovers_pose_and_weights(model):
+    rng = np.random.default_rng(14)
+    weights, F_true, d = synthetic_problem(model, rng)
+    result = deformable_registration(d, model)
+    assert result.converged
+    assert is_rotation(result.F.R)
+    angle, distance = frame_difference(F_true, result.F)
+    assert np.degrees(angle) < 1e-3 and distance < 1e-3
+    assert np.max(np.abs(result.weights - weights)) < 0.01
+    assert result.history[-1].rms_residual < 1e-3
+    assert result.count("rigid") > 0 and result.count("mode") > 0 and result.count("combined") > 0
+    log = format_deformable_history(result.history).splitlines()
+    assert len(log) == len(result.history) + 1 and "lambda_6" in log[0]
+    assert log[-1].split()[1] == "combined"
+
+
+def test_combined_steps_alone_reach_the_same_answer(model):
+    rng = np.random.default_rng(15)
+    _, _, d = synthetic_problem(model, rng, noise=0.1)
+    default = deformable_registration(d, model)
+    combined_only = deformable_registration(d, model, DeformableOptions(use_alternation=False))
+    assert combined_only.count("mode") == 0
+    assert np.max(np.abs(default.weights - combined_only.weights)) < 0.01
+    angle, distance = frame_difference(default.F, combined_only.F)
+    assert np.degrees(angle) < 1e-3 and distance < 1e-3
 
 
 def test_fewer_modes(model):
