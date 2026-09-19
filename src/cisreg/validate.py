@@ -101,12 +101,14 @@ def frame_check(assignment: str, data_dir: Path, output_dir: Path, search_factor
     The output files do not contain F_reg, but s_k = F_reg d_k with d_k known
     (our pointer tips), so F_reg can be recovered by registering d_k onto s_k.
     Doing this for our files and for the reference files gives the two frames.
-    Both are then scored by the ICP objective, the sum over k of the squared
-    distance from F d_k to the surface (for PA5, to the mean shape, so only the
-    frame difference is meaningful there).
+    Both are then scored by the registration objective, the sum over k of the
+    squared distance from F d_k to the surface. For PA5 each frame is scored on
+    the surface deformed with the weights from the same file.
     """
+    from cisreg.fileio import read_modes
     from cisreg.frames import frame_difference
     from cisreg.registration import register_points
+    from cisreg.shape_model import ShapeModel
     from cisreg.tracking import pointer_tips
 
     lines = [
@@ -118,17 +120,81 @@ def frame_check(assignment: str, data_dir: Path, output_dir: Path, search_factor
         if not datasets.is_debug(label) or not ours_path.exists():
             continue
         inputs = datasets.load_inputs(data_dir, assignment, label)
-        search = search_factory(inputs.mesh)
         d = pointer_tips(inputs.body_a, inputs.body_b, inputs.samples)
-        F_ours = register_points(d, read_output(ours_path).s)
-        F_ref = register_points(d, read_output(datasets.output_path(data_dir, assignment, label)).s)
+        ours = read_output(ours_path)
+        ref = read_output(datasets.output_path(data_dir, assignment, label))
+        if assignment == "PA5":
+            atlas = read_modes(datasets.modes_path(data_dir))
+            model = ShapeModel.from_atlas(atlas, inputs.mesh, inputs.samples.n_modes)
+            search_ours = search_factory(model.mesh(ours.weights))
+            search_ref = search_factory(model.mesh(ref.weights))
+        else:
+            search_ours = search_ref = search_factory(inputs.mesh)
+        F_ours = register_points(d, ours.s)
+        F_ref = register_points(d, ref.s)
         angle, distance = frame_difference(F_ours, F_ref)
-        sse_ours = float(np.sum(search.closest_points(F_ours.apply(d)).distances ** 2))
-        sse_ref = float(np.sum(search.closest_points(F_ref.apply(d)).distances ** 2))
+        sse_ours = float(np.sum(search_ours.closest_points(F_ours.apply(d)).distances ** 2))
+        sse_ref = float(np.sum(search_ref.closest_points(F_ref.apply(d)).distances ** 2))
         lines.append(
             f"| {label} | {np.degrees(angle):.4f} | {distance:.4f} | {sse_ours:.4f} | {sse_ref:.4f} |"
         )
     return "\n".join(lines)
+
+
+def weights_table(data_dir: Path, output_dir: Path) -> str:
+    """PA5 mode weights: max |difference| between ours, the Output file and the Answer file."""
+    lines = [
+        "| Set | max abs(ours - Output) | max abs(ours - Answer) | max abs(Output - Answer) |",
+        "|---|---|---|---|",
+    ]
+    for label in datasets.list_sets(data_dir, "PA5"):
+        ours_path = Path(output_dir) / f"PA5-{label}-Output.txt"
+        if not datasets.is_debug(label) or not ours_path.exists():
+            continue
+        ours = read_output(ours_path).weights
+        out = read_output(datasets.output_path(data_dir, "PA5", label)).weights
+        ans = read_output(datasets.answer_path(data_dir, "PA5", label)).weights
+        lines.append(
+            f"| {label} | {np.abs(ours - out).max():.4f} | {np.abs(ours - ans).max():.4f} "
+            f"| {np.abs(out - ans).max():.4f} |"
+        )
+    return "\n".join(lines)
+
+
+def rounding_sensitivity(data_dir: Path, label: str, trials: int, seed: int = 0) -> str:
+    """How much the PA5 weights move when the readings are perturbed at their rounding level.
+
+    The readings are given to 0.01 mm. Adding uniform noise in [-0.005, 0.005] mm to
+    every reading and solving again shows how precisely the data determine the
+    weights, independently of the algorithm.
+    """
+    from cisreg.fileio import SampleReadings, read_modes
+    from cisreg.pa5 import solve_pa5
+
+    inputs = datasets.load_inputs(data_dir, "PA5", label)
+    atlas = read_modes(datasets.modes_path(data_dir))
+    rng = np.random.default_rng(seed)
+    _, base = solve_pa5(inputs, atlas)
+    samples = inputs.samples
+    changes = []
+    for _ in range(trials):
+        jittered = SampleReadings(
+            samples.a + rng.uniform(-0.005, 0.005, samples.a.shape),
+            samples.b + rng.uniform(-0.005, 0.005, samples.b.shape),
+            samples.dummy,
+            samples.n_modes,
+        )
+        _, result = solve_pa5(datasets.ProblemInputs(inputs.mesh, inputs.body_a, inputs.body_b, jittered), atlas)
+        changes.append(result.weights - base.weights)
+    changes = np.array(changes)
+    std = changes.std(axis=0)
+    worst = np.abs(changes).max(axis=0)
+    return (
+        f"{label}, {trials} trials: standard deviation of each weight "
+        + ", ".join(f"{v:.4f}" for v in std)
+        + "; largest change "
+        + ", ".join(f"{v:.4f}" for v in worst)
+    )
 
 
 def markdown_table(rows: list[SetComparison], point: str = "s") -> str:
@@ -154,6 +220,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("assignment", choices=["PA3", "PA4", "PA5"])
     parser.add_argument("--data-dir", type=Path, default=datasets.DEFAULT_DATA_DIR)
     parser.add_argument("--output-dir", type=Path, default=Path("output"))
+    parser.add_argument("--rounding-sets", nargs="*", default=[], help="PA5 sets for the rounding test")
+    parser.add_argument("--rounding-trials", type=int, default=10)
     args = parser.parse_args(argv)
     point = "d" if args.assignment == "PA3" else "s"
     for kind in ("Output", "Answer"):
@@ -170,6 +238,11 @@ def main(argv: list[str] | None = None) -> None:
 
         print("Our F_reg against the reference F_reg implied by s'_k:\n")
         print(frame_check(args.assignment, args.data_dir, args.output_dir, BoundingBoxTree) + "\n")
+    if args.assignment == "PA5":
+        print("Mode weights:\n")
+        print(weights_table(args.data_dir, args.output_dir) + "\n")
+        for label in args.rounding_sets:
+            print(rounding_sensitivity(args.data_dir, label, args.rounding_trials) + "\n")
 
 
 if __name__ == "__main__":

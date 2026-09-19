@@ -112,7 +112,9 @@ class DeformableOptions:
     max_combined_iterations: int = 300
     weight_tol: float = 1e-5  # stop the mode loop when max |change in lambda| is below this
     motion_tol: float = 1e-5  # mm, for the outer loop and the combined steps
-    icp: IcpOptions = IcpOptions()
+    # The rigid solves inside the alternation only need to bring F_reg close, since the
+    # combined steps finish the job, so they stop at a looser motion tolerance.
+    icp: IcpOptions = IcpOptions(motion_tol=1e-3)
     use_alternation: bool = True
     use_combined: bool = True
 
