@@ -244,9 +244,10 @@ def write_output(
 class LogEntry:
     """One ``<set>: summary`` block of an instructor log file (the answer key).
 
-    The compact frame form ``Fr([r],[p]]`` is kept as written (rot_vec, p). When
-    the block also has "Matrix forms of frames", R and p are taken from it; each
-    ``R*x``, ``R*y``, ``R*z`` line is a column of R. Mode weights are listed in
+    The compact frame form ``Fr([r],[p]]`` is kept as written (rot_vec, p); r is
+    the rotation vector (axis times angle, radians). When the block also has
+    "Matrix forms of frames" (all entries in the course logs do), R and p are
+    taken from it; each ``R*x``, ``R*y``, ``R*z`` line is a column of R. Mode weights are listed in
     the log as "Mode 0" to "Mode N-1", which are atlas modes 1 to N.
     """
 

@@ -34,4 +34,4 @@ Output formats:
 - The PA5 sample header has a fourth field, the number of modes. The PA3 and PA4 headers carry a trailing `0` there.
 - The handout calls the files `paV-X-ddddd-SampleReadings.txt`. The actual names are `PAV-X-Ddddd-SampleReadingsTest.txt`.
 - Output and answer coordinates are rounded to 0.01 mm, so |s_k − c_k| recomputed from them differs from the stored magnitude by up to about 0.017 mm.
-- In the log files, each `R*x`, `R*y`, `R*z` line is a column of the rotation matrix. The PA5 weights are listed as "Mode 0" to "Mode 5"; these are atlas modes 1 to 6 (mode 0 of the atlas file is the mean shape). The first PA4 entry has no matrix block, and `PA4-B-Demo-Fast` appears twice.
+- In the log files, each `R*x`, `R*y`, `R*z` line is a column of the rotation matrix. The PA5 weights are listed as "Mode 0" to "Mode 5"; these are atlas modes 1 to 6 (mode 0 of the atlas file is the mean shape). In the compact form `Fr([r],[p]]`, r is the rotation vector (axis times angle, in radians). `PA4-B-Demo-Fast` appears twice.
