@@ -28,8 +28,12 @@ Search, for a batch of query points:
    child whose box is nearer.
 2. Walk the tree one level at a time, keeping the (query, node) pairs whose box
    is within that query's bound. Children of surviving internal nodes form the
-   next level; surviving leaves contribute their triangles.
-3. Drop (query, triangle) pairs whose triangle box is farther than the bound,
+   next level; surviving leaves are collected with their box distances.
+3. Without a hint, tighten the bound first: test the triangles of each query's
+   nearest candidate leaf, lower the bound, and drop the candidate leaves that
+   are now too far. (A hint from the previous ICP match is usually tight
+   already, and the extra step would only add overhead.)
+4. Drop (query, triangle) pairs whose triangle box is farther than the bound,
    then compute the exact closest point for the rest (closest_point_on_triangle)
    and keep the nearest triangle for each query.
 The true closest triangle is at most `bound` away, so every box on its path from
@@ -37,6 +41,17 @@ the root is too, and it always survives; the result is exactly the brute-force
 result. The bound is not lowered during the walk (unlike the depth-first version
 in the lecture), which costs some extra triangle tests but lets every step run
 as one vectorized NumPy operation over all queries at once.
+
+Oriented boxes (option `oriented=True`). The lecture also describes covariance
+(principal direction) trees, in which each node's box is aligned with the
+principal axes of its points. Here each node then gets the eigenvectors of the
+scatter matrix of its triangle corners as axes, its box is computed in those
+axes, and the query is rotated into them before the box test (rotations keep
+distances, so the bound stays valid). The boxes are about three times smaller
+in volume, but on this mesh the search was not faster: the greedy seed is
+worse with thin boxes and every box test needs a rotation. The experiment was
+prompted by a covariance tree in a public CIS I solution and is described in
+results/comparison_with_public_solutions.md.
 
 Deforming meshes (PA5). The tree topology only depends on which triangles are
 grouped together, so after the vertices move it is enough to recompute the
@@ -63,19 +78,21 @@ def box_distance2(points: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndar
 
 
 class BoundingBoxTree:
-    """Binary tree of axis-aligned bounding boxes over mesh triangles."""
+    """Binary tree of bounding boxes over mesh triangles (axis-aligned, or oriented per node)."""
 
-    def __init__(self, mesh: Mesh, leaf_size: int = 8):
+    def __init__(self, mesh: Mesh, leaf_size: int = 8, oriented: bool = False):
         self.triangles = mesh.triangles
         self.leaf_size = leaf_size
+        self.oriented = oriented
         corners = np.asarray(mesh.vertices, dtype=float)[self.triangles]
-        self._build(corners.mean(axis=1))
+        self._build(corners)
         self.update_vertices(mesh.vertices)
         self.triangle_checks = 0  # exact triangle tests in the last query, for reports
 
-    def _build(self, centroids: np.ndarray) -> None:
+    def _build(self, corners: np.ndarray) -> None:
+        centroids = corners.mean(axis=1)
         order = np.arange(len(centroids))
-        start, end, left, right = [], [], [], []
+        start, end, left, right, frames, centers = [], [], [], [], [], []
 
         def build(first: int, last: int) -> int:
             node = len(start)
@@ -83,17 +100,27 @@ class BoundingBoxTree:
             end.append(last)
             left.append(-1)
             right.append(-1)
+            ids = order[first:last]
+            R, center = np.eye(3), np.zeros(3)
+            if self.oriented:
+                points = corners[ids].reshape(-1, 3)
+                center = points.mean(axis=0)
+                _, vectors = np.linalg.eigh((points - center).T @ (points - center))
+                R = vectors[:, ::-1]
+            frames.append(R)
+            centers.append(center)
             if last - first > self.leaf_size:
-                ids = order[first:last]
-                spread = centroids[ids].max(axis=0) - centroids[ids].min(axis=0)
-                axis = int(np.argmax(spread))
+                local = (centroids[ids] - center) @ R
+                axis = int(np.argmax(local.max(axis=0) - local.min(axis=0)))
                 half = (last - first) // 2
-                order[first:last] = ids[np.argpartition(centroids[ids, axis], half)]
+                order[first:last] = ids[np.argpartition(local[:, axis], half)]
                 left[node] = build(first, first + half)
                 right[node] = build(first + half, last)
             return node
 
         build(0, len(centroids))
+        self.frames = np.array(frames)
+        self.centers = np.array(centers)
         self.order = order
         self.start = np.array(start)
         self.end = np.array(end)
@@ -110,6 +137,13 @@ class BoundingBoxTree:
         self.tri_hi = corners.max(axis=1)
         self.lo = np.empty((self.n_nodes, 3))
         self.hi = np.empty((self.n_nodes, 3))
+        if self.oriented:
+            # Each node has its own axes, so boxes cannot be merged from the children.
+            for node in range(self.n_nodes):
+                tris = self.order[self.start[node] : self.end[node]]
+                local = (corners[tris].reshape(-1, 3) - self.centers[node]) @ self.frames[node]
+                self.lo[node], self.hi[node] = local.min(axis=0), local.max(axis=0)
+            return
         # Nodes were numbered parent before children, so reverse order visits children first.
         for node in range(self.n_nodes - 1, -1, -1):
             if self.is_leaf[node]:
@@ -146,21 +180,37 @@ class BoundingBoxTree:
         bound2[seed[0]] = seed[1]
 
         k, node = np.arange(n), np.zeros(n, dtype=int)
-        leaf_k, leaf_node = [], []
+        leaf_k, leaf_node, leaf_lb = [], [], []
         while k.size:
-            keep = box_distance2(queries[k], self.lo[node], self.hi[node]) <= bound2[k]
-            k, node = k[keep], node[keep]
+            lower = self._node_distance2(queries[k], node)
+            keep = lower <= bound2[k]
+            k, node, lower = k[keep], node[keep], lower[keep]
             leaf = self.is_leaf[node]
             leaf_k.append(k[leaf])
             leaf_node.append(node[leaf])
+            leaf_lb.append(lower[leaf])
             k, node = k[~leaf], node[~leaf]
             k = np.concatenate([k, k])
             node = np.concatenate([self.left[node], self.right[node]])
+        k, node, lower = np.concatenate(leaf_k), np.concatenate(leaf_node), np.concatenate(leaf_lb)
 
-        k, t = self._leaf_pairs(np.concatenate(leaf_k), np.concatenate(leaf_node))
+        extra_checks = 0
+        if hint is None:
+            # Without a hint the seed can be loose: tighten it with each query's most
+            # promising leaf (smallest box distance) before testing the rest.
+            order = np.lexsort((lower, k))
+            first = order[np.r_[True, k[order][1:] != k[order][:-1]]]
+            fk, ft = self._leaf_pairs(k[first], node[first])
+            best_k, best_d2, *_ = self._best_of_pairs(queries, fk, ft)
+            bound2[best_k] = np.minimum(bound2[best_k], best_d2)
+            keep = lower <= bound2[k]
+            k, node = k[keep], node[keep]
+            extra_checks = len(fk)
+
+        k, t = self._leaf_pairs(k, node)
         keep = box_distance2(queries[k], self.tri_lo[t], self.tri_hi[t]) <= bound2[k]
         k, t = k[keep], t[keep]
-        self.triangle_checks = len(k)
+        self.triangle_checks = len(k) + extra_checks
         _, d2, points, weights, triangles = self._best_of_pairs(queries, k, t)
         return MeshMatches(points, np.sqrt(d2), triangles, weights)
 
@@ -171,10 +221,16 @@ class BoundingBoxTree:
         while inner.size:
             a, b = self.left[node[inner]], self.right[node[inner]]
             pts = queries[inner]
-            nearer_a = box_distance2(pts, self.lo[a], self.hi[a]) <= box_distance2(pts, self.lo[b], self.hi[b])
+            nearer_a = self._node_distance2(pts, a) <= self._node_distance2(pts, b)
             node[inner] = np.where(nearer_a, a, b)
             inner = inner[~self.is_leaf[node[inner]]]
         return node
+
+    def _node_distance2(self, points: np.ndarray, nodes: np.ndarray) -> np.ndarray:
+        """Squared distance from each point to the box of the paired node (0 inside)."""
+        if self.oriented:
+            points = np.einsum("ni,nij->nj", points - self.centers[nodes], self.frames[nodes])
+        return box_distance2(points, self.lo[nodes], self.hi[nodes])
 
     def _leaf_pairs(self, k: np.ndarray, leaves: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Expand (query, leaf) pairs into (query, triangle) pairs."""

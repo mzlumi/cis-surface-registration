@@ -60,6 +60,7 @@ python -m cisreg.answer_key              # comparison with the instructor's log 
 | [`results/pa5_validation.md`](results/pa5_validation.md), [`results/pa5_runs.md`](results/pa5_runs.md) | PA5 validation, mode weights and F_reg for every set |
 | [`results/answer_key_comparison.md`](results/answer_key_comparison.md) | Unknown sets against the instructor's log files |
 | [`results/error_analysis.md`](results/error_analysis.md) | Convergence basin, marker noise, number of modes, timing |
+| [`results/comparison_with_public_solutions.md`](results/comparison_with_public_solutions.md) | Public Fall 2025 solutions scored against the same answer key, and what was changed as a result |
 
 PA4 validation against the instructor's Output files (mm; full tables in the files above):
 
@@ -85,6 +86,7 @@ On the noisy sets, and for the PA5 weights, the differences are larger than roun
 |---|---|
 | `src/cisreg/` | The package: readers (`fileio`), frames and registration, `triangle`, `search` (brute force), `boxtree`, `tracking`, `icp`, `shape_model`, `deformable`, the programs `pa3`, `pa4`, `pa5`, and the tools `validate`, `benchmark`, `analysis`, `answer_key`, `plots` |
 | `tests/` | pytest suite, run by GitHub Actions on every push |
+| `scripts/` | `compare_public_solutions.py`: scores public solutions against the answer key |
 | `output/` | Output files for every set, in the handout format |
 | `results/`, `figures/` | Validation tables, logs, analysis and figures |
 | `report/` | LaTeX source and PDF of the report |
@@ -107,8 +109,11 @@ The course covers imaging, segmentation and modeling, frames and calibration, re
 
 ### Links
 
-- Course page: <https://ciis.lcsr.jhu.edu/doku.php?id=courses:455-655:455-655>
+- Official course website (EN.601.455/655 Computer Integrated Surgery I): <https://ciis.lcsr.jhu.edu/doku.php?id=courses:455-655:455-655>
 - Fall 2025 schedule, with handouts, data and lectures: <https://ciis.lcsr.jhu.edu/doku.php?id=courses:455-655:2025:fall-2025-schedule>
+- Prof. Russell H. Taylor, JHU Department of Computer Science faculty page: <https://www.cs.jhu.edu/faculty/russell-taylor/>
+- Prof. Taylor's personal academic page: <https://www.cs.jhu.edu/~rht/>
+- Laboratory for Computational Sensing and Robotics (LCSR): <https://lcsr.jhu.edu/>
 - cisst libraries mentioned in the handouts: <https://github.com/jhu-cisst/cisst>
 
 ## The problem
@@ -147,6 +152,21 @@ The instructor's log files contain the true F_reg and mode weights for every set
 
 The hardest part was knowing when a result was right. Matching the instructor's numbers to the last digit turned out to be the wrong goal: the data files are rounded to 0.01 mm, so two correct programs can only agree to about that level. I learned to work out that floor first, and then to compare solutions by the quantity they minimize rather than by how close they are to a reference. Small geometric details mattered more than I expected: the closest point on an obtuse triangle and the reflection case of the SVD registration both look minor, and both give wrong answers if they are skipped. In PA5, the alternating method was slow because pose and shape pull the points in similar directions. Solving for both together in one linearized step fixed that, which is a lesson I expect to use again in robotics and biomechanics problems where several kinds of unknowns are coupled.
 
+## Comparison with other public solutions
+
+After all results were final, I compared them with public solutions to the same Fall 2025 assignments ([details](results/comparison_with_public_solutions.md), reproducible with `python scripts/compare_public_solutions.py`). Scored against the same answer key, our F_reg has the lowest sum of squared surface distances on every PA4 and PA5 unknown set, and our PA5 noise-free weights are 10 to 22 times closer to the truth than the only other published PA5 outputs. The comparison also found that a vertex-based KD-tree in one solution misses the true closest point by up to 1.1 mm, a failure mode our exact-equality tests rule out.
+
+Two ideas from the other repositories were tested in this code: an oriented-box (covariance) tree, which gives tighter boxes but no speedup on this mesh and is kept as an option, and, prompted by that experiment, a tighter seed bound for searches without a hint, which cuts the triangle tests for those searches by about a third. No code from these repositories was copied (they carry no license).
+
 ## Credit
 
-The problem, the handouts, the lecture notes and the data are by Russell H. Taylor and the CIS I teaching staff at Johns Hopkins University. They are included here for reference only. The code here was written for this project from the handouts alone; no code from past students' solutions was used.
+The problem, the handouts, the lecture notes and the data are by Russell H. Taylor and the CIS I teaching staff at Johns Hopkins University. They are included here for reference only. The code here was written for this project from the handouts; no code from other students' solutions was used.
+
+Public solutions consulted for the comparison above, with thanks to their authors:
+
+- [SeanSDarcy2001/CISProgrammingAssignments](https://github.com/SeanSDarcy2001/CISProgrammingAssignments) (Fall 2021): its covariance tree prompted the oriented-box option and the tighter seed bound in [`src/cisreg/boxtree.py`](src/cisreg/boxtree.py). It builds on the course template [benjamindkilleen/ciscode](https://github.com/benjamindkilleen/ciscode) by Benjamin D. Killeen.
+- [mayasharma604/CIS-PA3](https://github.com/mayasharma604/CIS-PA3), [CIS-PA4](https://github.com/mayasharma604/CIS-PA4) and [CIS-PA5](https://github.com/mayasharma604/CIS-PA5) by Maya Sharma and Anishka Bhartiya (Fall 2025).
+- [pranhav16/CIS_PA4](https://github.com/pranhav16/CIS_PA4) by Luiza Brunelli and Pranhav Sundararajan (Fall 2025).
+- [vibhakamath23/CIS-PA3](https://github.com/vibhakamath23/CIS-PA3) (Fall 2025).
+- [SIDR73/cis2025](https://github.com/SIDR73/cis2025) (Fall 2025).
+- [suryanshshukla10/CIS-PA4](https://github.com/suryanshshukla10/CIS-PA4) and [CIS-PA5](https://github.com/suryanshshukla10/CIS-PA5) (Fall 2021).

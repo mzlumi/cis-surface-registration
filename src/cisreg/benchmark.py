@@ -39,6 +39,7 @@ def run(data_dir: Path, seed: int = 0) -> str:
     brute = BruteForceSearch(mesh)
     build = best_time(lambda: BoundingBoxTree(mesh))
     tree = BoundingBoxTree(mesh)
+    oriented = BoundingBoxTree(mesh, oriented=True)
 
     rows = []
     worst = 0.0
@@ -47,13 +48,17 @@ def run(data_dir: Path, seed: int = 0) -> str:
         nonlocal worst
         t_brute = best_time(lambda: brute.closest_points(queries))
         t_tree = best_time(lambda: tree.closest_points(queries, hint=hint))
+        t_oriented = best_time(lambda: oriented.closest_points(queries, hint=hint))
         slow = brute.closest_points(queries)
-        fast = tree.closest_points(queries, hint=hint)
-        worst = max(worst, float(np.max(np.abs(fast.distances - slow.distances))))
+        for search in (tree, oriented):
+            fast = search.closest_points(queries, hint=hint)
+            worst = max(worst, float(np.max(np.abs(fast.distances - slow.distances))))
+        tree.closest_points(queries, hint=hint)
         checks = tree.triangle_checks / len(queries)
+        oriented_checks = oriented.triangle_checks / len(queries)
         rows.append(
             f"| {name} | {len(queries)} | {1e3 * t_brute:.1f} | {1e3 * t_tree:.1f} "
-            f"| {t_brute / t_tree:.1f} | {checks:.0f} |"
+            f"| {t_brute / t_tree:.1f} | {checks:.0f} | {1e3 * t_oriented:.1f} | {oriented_checks:.0f} |"
         )
 
     for assignment in ("PA3", "PA4", "PA5"):
@@ -82,14 +87,16 @@ def run(data_dir: Path, seed: int = 0) -> str:
         f"{1e3 * build:.1f} ms.",
         "",
         "\"Tests per query\" is the number of exact point-to-triangle tests the tree needed per",
-        f"query point; brute force always does {mesh.n_triangles}.",
+        f"query point; brute force always does {mesh.n_triangles}. The last two columns are the",
+        "same tree with oriented (principal-axis) boxes, `BoundingBoxTree(mesh, oriented=True)`;",
+        "see the module docstring of `cisreg.boxtree` and `comparison_with_public_solutions.md`.",
         "",
-        "| Queries | N | Brute force (ms) | Tree (ms) | Speedup | Tests per query |",
-        "|---|---|---|---|---|---|",
+        "| Queries | N | Brute force (ms) | Tree (ms) | Speedup | Tests per query | Oriented tree (ms) | Oriented tests per query |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     footer = [
         "",
-        f"Largest difference between the two searches' distances over all rows: {worst:.1e} mm.",
+        f"Largest difference between brute force and either tree over all rows: {worst:.1e} mm.",
         "",
         "The pointer tips lie within a few millimetres of the surface, so the seeded bound is",
         "small and only a handful of leaf boxes stay in play. Random points in the bounding box",
@@ -99,6 +106,11 @@ def run(data_dir: Path, seed: int = 0) -> str:
         "iteration after the first. For a single query the tree's fixed cost of about 1 ms of",
         "NumPy calls dominates; the advantage grows with the batch size because each tree level",
         "is processed for all queries in one vectorized step.",
+        "",
+        "The oriented boxes enclose about a third of the volume of the axis-aligned ones, but",
+        "on this mesh they do not make the search faster: every box test needs a rotation, and",
+        "the greedy seed is worse with thin boxes, so the tighter boxes give about the same",
+        "number of triangle tests.",
         "",
     ]
     return "\n".join(header + rows + footer)

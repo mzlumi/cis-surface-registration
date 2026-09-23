@@ -20,9 +20,9 @@ def bone() -> Mesh:
     return read_mesh(DATA_DIR / "Problem3MeshFile.sur")
 
 
-@pytest.fixture(scope="module")
-def tree(bone) -> BoundingBoxTree:
-    return BoundingBoxTree(bone)
+@pytest.fixture(scope="module", params=[False, True], ids=["axis-aligned", "oriented"])
+def tree(bone, request) -> BoundingBoxTree:
+    return BoundingBoxTree(bone, oriented=request.param)
 
 
 @pytest.fixture(scope="module")
@@ -75,11 +75,12 @@ def test_any_hint_gives_the_same_answer(bone, tree, brute):
     assert_same_matches(bone, queries, tree.closest_points(queries, hint=slow.triangles), slow)
 
 
-def test_refit_after_deformation(bone):
+@pytest.mark.parametrize("oriented", [False, True])
+def test_refit_after_deformation(bone, oriented):
     """PA5 deforms the mesh; after update_vertices the tree must still be exact."""
     modes = read_modes(DATA_DIR / "Problem5Modes.txt")
     deformed = modes[0] + np.tensordot([80.0, -60.0, 40.0, 30.0, -50.0, 20.0], modes[1:], axes=1)
-    tree = BoundingBoxTree(bone)
+    tree = BoundingBoxTree(bone, oriented=oriented)
     tree.update_vertices(deformed)
     brute = BruteForceSearch(Mesh(deformed, bone.triangles, bone.neighbors))
     rng = np.random.default_rng(11)
@@ -97,8 +98,10 @@ def test_tree_structure(bone, tree):
     corners = bone.vertices[bone.triangles]
     for node in range(tree.n_nodes):
         tris = tree.order[tree.start[node] : tree.end[node]]
-        inside = corners[tris]
-        assert np.all(inside >= tree.lo[node] - 1e-12) and np.all(inside <= tree.hi[node] + 1e-12)
+        R = tree.frames[node]
+        assert np.allclose(R.T @ R, np.eye(3))
+        inside = (corners[tris] - tree.centers[node]) @ R
+        assert np.all(inside >= tree.lo[node] - 1e-9) and np.all(inside <= tree.hi[node] + 1e-9)
         if tree.is_leaf[node]:
             assert len(tris) <= tree.leaf_size
         else:
@@ -115,6 +118,13 @@ def test_tiny_mesh_is_a_single_leaf():
     assert tree.n_nodes == 1
     m = tree.closest_points(np.array([[0.2, 0.2, -1.0]]))
     assert np.allclose(m.points, [[0.2, 0.2, 0.0]])
+
+
+def test_oriented_boxes_are_tighter(bone):
+    """Principal-axis boxes enclose less volume than axis-aligned ones."""
+    aligned, oriented = BoundingBoxTree(bone), BoundingBoxTree(bone, oriented=True)
+    volume = lambda t: np.prod(t.hi - t.lo, axis=1)[t.is_leaf].mean()  # noqa: E731
+    assert volume(oriented) < 0.6 * volume(aligned)
 
 
 def test_box_distance():
