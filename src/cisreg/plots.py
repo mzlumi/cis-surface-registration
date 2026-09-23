@@ -74,6 +74,66 @@ def plot_deformable_convergence(histories: dict, path: Path) -> None:
     plt.close(fig)
 
 
+def plot_registration_overview(mean_mesh, fitted_mesh, before, before_dist, after, after_dist, path: Path,
+                               title: str) -> None:
+    """The bone with the probed points before (F_reg = I, mean shape) and after deformable registration."""
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    fig = plt.figure(figsize=(11, 5.2))
+    vmax = float(max(before_dist.max(), 1.0))
+    panels = [
+        (mean_mesh, before, before_dist, "Before: F_reg = I, mean shape"),
+        (fitted_mesh, after, after_dist, "After: F_reg and 6 mode weights estimated"),
+    ]
+    for i, (mesh, points, dist, subtitle) in enumerate(panels, start=1):
+        ax = fig.add_subplot(1, 2, i, projection="3d")
+        surface = Poly3DCollection(mesh.vertices[mesh.triangles], facecolor=(0.85, 0.82, 0.75), edgecolor=(0.6, 0.6, 0.6, 0.15), linewidths=0.2, alpha=0.35)
+        ax.add_collection3d(surface)
+        sc = ax.scatter(*points.T, c=dist, cmap="viridis", vmin=0.0, vmax=vmax, s=12, depthshade=False)
+        lo, hi = mesh.vertices.min(axis=0), mesh.vertices.max(axis=0)
+        center, half = (lo + hi) / 2, (hi - lo).max() / 2
+        ax.set_xlim(center[0] - half, center[0] + half)
+        ax.set_ylim(center[1] - half, center[1] + half)
+        ax.set_zlim(center[2] - half, center[2] + half)
+        ax.set_box_aspect((1, 1, 1))
+        ax.view_init(elev=15, azim=-60)
+        ax.set_axis_off()
+        rms = float(np.sqrt(np.mean(dist**2)))
+        ax.set_title(f"{subtitle}\nRMS distance {rms:.3f} mm", fontsize=10)
+    cbar = fig.colorbar(sc, ax=fig.axes, shrink=0.6, pad=0.02)
+    cbar.set_label("distance of each probed point to the surface (mm)")
+    fig.suptitle(title)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """Draw figures/overview.png from one PA5 debug set."""
+    import argparse
+
+    from cisreg import datasets
+    from cisreg.boxtree import BoundingBoxTree
+    from cisreg.fileio import read_modes
+    from cisreg.pa5 import solve_pa5
+    from cisreg.shape_model import ShapeModel
+
+    parser = argparse.ArgumentParser(description=main.__doc__)
+    parser.add_argument("--data-dir", type=Path, default=datasets.DEFAULT_DATA_DIR)
+    parser.add_argument("--set", default="D-Debug")
+    parser.add_argument("--out", type=Path, default=Path("figures/overview.png"))
+    args = parser.parse_args(argv)
+    inputs = datasets.load_inputs(args.data_dir, "PA5", args.set)
+    atlas = read_modes(datasets.modes_path(args.data_dir))
+    d, result = solve_pa5(inputs, atlas)
+    model = ShapeModel.from_atlas(atlas, inputs.mesh, inputs.samples.n_modes)
+    before = BoundingBoxTree(inputs.mesh).closest_points(d).distances
+    plot_registration_overview(
+        inputs.mesh, model.mesh(result.weights), d, before, result.s, result.matches.distances, args.out,
+        f"PA5-{args.set}: {len(d)} probed points registered to a statistical bone model",
+    )
+
+
 def residual_histogram(residuals: dict[str, np.ndarray], path: Path, title: str) -> None:
     """Histograms of the final residuals |s_k - c_k| for several sets."""
     fig, ax = plt.subplots(figsize=(6.5, 4))
@@ -87,3 +147,7 @@ def residual_histogram(residuals: dict[str, np.ndarray], path: Path, title: str)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=150)
     plt.close(fig)
+
+
+if __name__ == "__main__":
+    main()

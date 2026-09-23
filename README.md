@@ -1,8 +1,95 @@
 # Surface Registration: ICP and Deformable Registration to a Statistical Shape Model
 
-My implementation of Programming Assignments 3, 4 and 5 from **Computer Integrated Surgery I** at Johns Hopkins University. It registers points touched on a bone with a tracked pointer to a CT-derived bone surface. The progression is: closest points on a triangle mesh, then rigid iterative closest point (ICP), then deformable registration to a statistical shape atlas. Everything is built from scratch and validated against the course's reference outputs.
+![Probed points before and after deformable registration](figures/overview.png)
+
+My implementation of Programming Assignments 3, 4 and 5 from **Computer Integrated Surgery I** at Johns Hopkins University. It registers points touched on a bone with a tracked pointer to a CT-derived bone surface. The progression is: closest points on a triangle mesh, then rigid iterative closest point (ICP), then deformable registration to a statistical shape atlas. Everything is built from scratch in Python and NumPy and validated against the course's reference outputs.
 
 This is the follow-up to [cis-surgical-navigation](https://github.com/mzlumi/cis-surgical-navigation), which covers PA1 and PA2 (frames, point-set registration, pivot calibration, EM distortion correction).
+
+## Summary
+
+- **Closest point on a triangle** by barycentric least squares, with the boundary handled by projecting onto all three edges. A fixed edge rule picks the wrong edge for some obtuse triangles; the tests include such a case.
+- **Bounding-box tree** over the 3135 triangles. Its results are identical to brute force on every data set, and it is 20 to 100 times faster for the 75 to 400 points of a data set.
+- **Rigid ICP** with a match threshold that shrinks over the iterations and a stopping rule based on how far the last update moved the points. It converges on every set and from initial rotation errors up to about 75 degrees.
+- **Deformable registration** (PA5): rigid ICP, then alternating mode-weight and rigid steps, then the handout's linearized combined update with an exact rotation from the small-angle vector.
+- **Validation**: all debug sets match the instructor's outputs to the 0.01 mm rounding of the files (noise-free) or to 0.06 mm (noisy). The unknown-set results were committed before the answer key was opened; all of them agree with it to the precision the data allow.
+
+| Assignment | Debug sets: max difference of s_k from the reference | Unknown sets: error of F_reg against the truth |
+|---|---|---|
+| PA3 | 0.022 mm | (F_reg = I) |
+| PA4 | 0.022 mm noise-free, 0.051 mm with 0.1 mm noise | at most 0.005 deg and 0.002 mm noise-free; 0.074 deg and 0.015 mm noisy |
+| PA5 | 0.025 mm noise-free, 0.033 mm noisy; weights within 0.05 (noise-free) | at most 0.005 deg and 0.002 mm noise-free; 0.036 deg and 0.017 mm noisy; noise-free weights within 0.1 |
+
+The report is [`report/report.pdf`](report/report.pdf) (7 pages).
+
+## Install and run
+
+Python 3.11 or newer.
+
+```
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+pytest                                   # about 500 tests, 1 to 2 minutes
+```
+
+Run one set or all sets of an assignment. Outputs go to `output/`, per-iteration logs to `results/logs/`, summaries to `results/` and figures to `figures/`:
+
+```
+python -m cisreg.pa3 --set A-Debug
+python -m cisreg.pa4 --all
+python -m cisreg.pa5 --all
+```
+
+Use `--data-dir` to point at another copy of the data and `--output-dir` to write elsewhere. Validation and analysis tools:
+
+```
+python -m cisreg.validate PA4            # compare with the debug Output and Answer files
+python -m cisreg.benchmark               # brute force against the tree
+python -m cisreg.analysis                # error analysis figures (about 15 minutes)
+python -m cisreg.answer_key              # comparison with the instructor's log files
+```
+
+## Results
+
+| Document | Contents |
+|---|---|
+| [`results/pa3_validation.md`](results/pa3_validation.md) | PA3 against the debug files, and why the remaining 0.01 mm is rounding |
+| [`results/search_timing.md`](results/search_timing.md) | Brute force against the bounding-box tree |
+| [`results/pa4_validation.md`](results/pa4_validation.md), [`results/pa4_runs.md`](results/pa4_runs.md) | PA4 validation, convergence, F_reg for every set |
+| [`results/pa5_validation.md`](results/pa5_validation.md), [`results/pa5_runs.md`](results/pa5_runs.md) | PA5 validation, mode weights and F_reg for every set |
+| [`results/answer_key_comparison.md`](results/answer_key_comparison.md) | Unknown sets against the instructor's log files |
+| [`results/error_analysis.md`](results/error_analysis.md) | Convergence basin, marker noise, number of modes, timing |
+
+PA4 validation against the instructor's Output files (mm; full tables in the files above):
+
+| Sets | max e_s | RMS e_s | F_reg difference |
+|---|---|---|---|
+| A to D and the four demo sets (noise-free) | 0.014 to 0.022 | 0.007 to 0.009 | at most 0.004 deg, 0.002 mm |
+| E and F (0.1 mm marker noise) | 0.051 | 0.021 to 0.024 | 0.02 to 0.03 deg, at most 0.014 mm |
+
+PA5 validation against the instructor's Output files:
+
+| Sets | max e_s (mm) | max weight difference | F_reg difference |
+|---|---|---|---|
+| A to D (noise-free) | 0.014 to 0.025 | 0.011 to 0.046 | at most 0.0044 deg, 0.0012 mm |
+| E and F (0.1 mm marker noise) | 0.028 to 0.033 | 0.20 to 0.34 | at most 0.021 deg, 0.004 mm |
+
+On the noisy sets, and for the PA5 weights, the differences are larger than rounding alone would explain. In every such case our solution has the lower sum of squared distances to the surface, so the instructor's program stopped at a slightly different point. Perturbing the readings at their rounding level moves the PA5 weights by about as much as the observed differences.
+
+![ICP convergence basin and marker noise](figures/icp_convergence_basin.png)
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/cisreg/` | The package: readers (`fileio`), frames and registration, `triangle`, `search` (brute force), `boxtree`, `tracking`, `icp`, `shape_model`, `deformable`, the programs `pa3`, `pa4`, `pa5`, and the tools `validate`, `benchmark`, `analysis`, `answer_key`, `plots` |
+| `tests/` | pytest suite, run by GitHub Actions on every push |
+| `output/` | Output files for every set, in the handout format |
+| `results/`, `figures/` | Validation tables, logs, analysis and figures |
+| `report/` | LaTeX source and PDF of the report |
+| `data/`, `docs/` | Course data, handouts and the two reference lectures |
+| `course-archive/` | Private copy of the course materials |
 
 ## The course
 
@@ -44,19 +131,21 @@ The full statements, file formats and rubrics are in [`docs/handout/`](docs/hand
 - **Debug sets** come with the instructor's outputs and the answers used to generate them.
 - **Unknown sets** come without outputs.
 
-The instructor's log files contain the true F_reg and mode weights for every set. They are kept as an answer key and used only after results are final.
-
-Correctness is shown by matching the debug outputs (closest points, F_reg, mode weights), and by checking the fast search against brute force. The noisy sets are analysed against the stated marker noise.
+The instructor's log files contain the true F_reg and mode weights for every set. They were kept as an answer key: all outputs were validated on the debug sets and committed first, and the comparison with the logs was made afterwards, in a separate commit.
 
 ## Status
 
-- [ ] Data readers and Cartesian math (frames, rigid point-set registration) with tests
-- [ ] Closest point on a triangle, brute-force closest point on a mesh
-- [ ] Fast closest-point search, validated against brute force
-- [ ] PA3 pipeline and outputs for all sets
-- [ ] PA4 rigid ICP and outputs for all sets
-- [ ] PA5 deformable registration and outputs for all sets
-- [ ] Error analysis and report
+- [x] Data readers and Cartesian math (frames, rigid point-set registration) with tests
+- [x] Closest point on a triangle, brute-force closest point on a mesh
+- [x] Fast closest-point search, validated against brute force
+- [x] PA3 pipeline and outputs for all sets
+- [x] PA4 rigid ICP and outputs for all sets
+- [x] PA5 deformable registration and outputs for all sets
+- [x] Error analysis and report
+
+## What I learned
+
+The hardest part was knowing when a result was right. Matching the instructor's numbers to the last digit turned out to be the wrong goal: the data files are rounded to 0.01 mm, so two correct programs can only agree to about that level. I learned to work out that floor first, and then to compare solutions by the quantity they minimize rather than by how close they are to a reference. Small geometric details mattered more than I expected: the closest point on an obtuse triangle and the reflection case of the SVD registration both look minor, and both give wrong answers if they are skipped. In PA5, the alternating method was slow because pose and shape pull the points in similar directions. Solving for both together in one linearized step fixed that, which is a lesson I expect to use again in robotics and biomechanics problems where several kinds of unknowns are coupled.
 
 ## Credit
 
